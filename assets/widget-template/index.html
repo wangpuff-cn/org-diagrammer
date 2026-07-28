@@ -107,6 +107,42 @@ const COLOR = {
 };
 const LINE_COLOR = '#1a1a1a', LINE_LW = 0.8, GEO_COLOR = '#666666', GEO_FONT = 12;
 
+/* ---------- 界面语言: 标题/节点名含中文 → 中文界面, 否则英文 ---------- */
+const I18N = {
+  zh: { color:'彩色', mono:'黑白', collapse:'层级折叠', expandAll:'全部展开', collapseAll:'全部折叠',
+        collapseTo: k => '折叠至' + k + '层', zoom:'缩放', fit:'适应窗口',
+        search:'搜索节点…', exportFile:'导出文件', exportSvg:'导出 SVG', exportPng:'导出 PNG', exportPdf:'导出 PDF',
+        more: n => `… 共 ${n} 条结果，仅显示前 10 条`,
+        vie:'协议控制', shareholders:'股东', topEntity:'顶层主体', bizFunc:'主体业务及职能',
+        orgFunc:'组织职能', leader:'负责人', headcount:'人数', regular:'正编人数', outsourced:'外包人数',
+        parent:'上级', topOrg:'顶层组织', people:'人', fileName:'架构图',
+        types:{offshore:'境外主体', natural_person:'自然人', domestic:'境内主体', listed:'上市主体', org:'组织'} },
+  en: { color:'Color', mono:'B&W', collapse:'Collapse', expandAll:'Expand All', collapseAll:'Collapse All',
+        collapseTo: k => 'Collapse to Level ' + k, zoom:'Zoom', fit:'Fit to Window',
+        search:'Search nodes…', exportFile:'Export', exportSvg:'Export SVG', exportPng:'Export PNG', exportPdf:'Export PDF',
+        more: n => `… ${n} results, showing top 10`,
+        vie:'Contractual Control (VIE)', shareholders:'Shareholders', topEntity:'Top-level Entity', bizFunc:'Business & Function',
+        orgFunc:'Function', leader:'Leader', headcount:'Headcount', regular:'Regular', outsourced:'Outsourced',
+        parent:'Parent', topOrg:'Top-level Org', people:'', fileName:'chart',
+        types:{offshore:'Offshore', natural_person:'Individual', domestic:'Domestic', listed:'Listed', org:'Org'} },
+};
+let L = I18N.en;
+function detectLang(data){
+  const probe = document.title + '|' + data.nodes.map(n => n.name + '|' + (n.geo||'')).join('|');
+  const cjk = (probe.match(/[\u4e00-\u9fff]/g) || []).length;
+  L = cjk >= 4 ? I18N.zh : I18N.en;
+}
+function applyI18n(){
+  document.getElementById('btn-theme').textContent = colorMode ? L.mono : L.color;
+  document.querySelector('#zoom-select option[value=""]').textContent = L.zoom;
+  document.querySelector('#zoom-select option[value="fit"]').textContent = L.fit;
+  document.getElementById('search-box').placeholder = L.search;
+  document.querySelector('#export-select option[value=""]').textContent = L.exportFile;
+  document.querySelector('#export-select option[value="svg"]').textContent = L.exportSvg;
+  document.querySelector('#export-select option[value="png"]').textContent = L.exportPng;
+  document.querySelector('#export-select option[value="pdf"]').textContent = L.exportPdf;
+}
+
 let DATA = null, colorMode = null, selected = null;
 const collapsed = new Set();   // 折叠状态跨 render 保留(主题切换不丢失)
 const svg = document.getElementById('stage');
@@ -136,10 +172,9 @@ function render(data){
   DATA = data; selected = null;
   if (colorMode === null){   // 首次渲染: 有 I 列填充色则默认彩色, 否则默认黑白
     colorMode = data.nodes.some(n => n.face);
-    const b = document.getElementById('btn-theme');
-    b.textContent = colorMode ? '黑白' : '彩色';
-    b.classList.toggle('active', colorMode);
+    document.getElementById('btn-theme').classList.toggle('active', colorMode);
   }
+  detectLang(data); applyI18n();
   svg.innerHTML = '';
   const vb = data.viewBox;
   view = {x:vb.x, y:vb.y, w:vb.w, h:vb.h};
@@ -214,14 +249,14 @@ function render(data){
 function hasKids(id){ return DATA.edges.some(e => e.from === id); }
 function buildCollapseOptions(data){
   const cs = document.getElementById('collapse-select');
-  cs.innerHTML = '<option value="" disabled selected>层级折叠</option>' +
-    '<option value="expand-all">全部展开</option>' +
-    '<option value="collapse-all">全部折叠</option>';
+  cs.innerHTML = `<option value="" disabled selected>${L.collapse}</option>` +
+    `<option value="expand-all">${L.expandAll}</option>` +
+    `<option value="collapse-all">${L.collapseAll}</option>`;
   const maxL = Math.max(...data.nodes.map(n => n.layer || 0));
   for (let k = 0; k < maxL; k++){
     const o = document.createElement('option');
     o.value = 'level-' + k;
-    o.textContent = '折叠至' + k + '层';
+    o.textContent = L.collapseTo(k);
     cs.appendChild(o);
   }
 }
@@ -414,28 +449,28 @@ function reroute(visIds, nx, nb){
 /* ---------- tooltip ---------- */
 function holdersOf(id){
   return DATA.edges.filter(e => e.to===id)
-    .map(e => `${e.from} ${e.ratio || (e.style==='dashed' ? '协议控制' : '')}`.trim());
+    .map(e => `${e.from} ${e.ratio || (e.style==='dashed' ? L.vie : '')}`.trim());
 }
 function showTip(n, ev){
-  const typeName = {offshore:'境外主体', natural_person:'自然人', domestic:'境内主体', listed:'上市主体', org:'组织'}[n.type] || '';
+  const typeName = L.types[n.type] || '';
   let html = `<div class="t-name">${esc(n.name)}</div>`;
   if (n.geo) html += `<div class="t-geo">${esc(n.geo)}${typeName ? ' · '+typeName : ''}</div>`;
   else if (typeName) html += `<div class="t-geo">${typeName}</div>`;
   if (n.type === 'org'){
     // 组织节点: 悬停展示 职能/负责人/人数/上级
-    if (n.function) html += `<div>组织职能:${esc(n.function)}</div>`;
-    if (n.leader) html += `<div>负责人:${esc(n.leader)}</div>`;
-    if (n.headcount !== undefined) html += `<div>人数:${esc(n.headcount)} 人</div>`;
+    if (n.function) html += `<div>${L.orgFunc}: ${esc(n.function)}</div>`;
+    if (n.leader) html += `<div>${L.leader}: ${esc(n.leader)}</div>`;
+    if (n.headcount !== undefined) html += `<div>${L.headcount}: ${esc(n.headcount)}${L.people?' '+L.people:''}</div>`;
     else {
-      if (n.regular !== undefined) html += `<div>正编人数:${esc(n.regular)} 人</div>`;
-      if (n.outsourced !== undefined) html += `<div>外包人数:${esc(n.outsourced)} 人</div>`;
+      if (n.regular !== undefined) html += `<div>${L.regular}: ${esc(n.regular)}${L.people?' '+L.people:''}</div>`;
+      if (n.outsourced !== undefined) html += `<div>${L.outsourced}: ${esc(n.outsourced)}${L.people?' '+L.people:''}</div>`;
     }
     const ups = DATA.edges.filter(e => e.to === n.id).map(e => e.from);
-    html += ups.length ? `<div>上级:${esc(ups.join(' / '))}</div>` : '<div>顶层组织</div>';
+    html += ups.length ? `<div>${L.parent}: ${esc(ups.join(' / '))}</div>` : `<div>${L.topOrg}</div>`;
   } else {
     const hs = holdersOf(n.id);
-    if (n.function) html += `<div>主体业务及职能:${esc(n.function)}</div>`;
-    html += hs.length ? `<div>股东:${esc(hs.join(' / '))}</div>` : '<div>顶层主体</div>';
+    if (n.function) html += `<div>${L.bizFunc}: ${esc(n.function)}</div>`;
+    html += hs.length ? `<div>${L.shareholders}: ${esc(hs.join(' / '))}</div>` : `<div>${L.topEntity}</div>`;
   }
   tip.innerHTML = html;
   tip.style.display = 'block';
@@ -529,7 +564,7 @@ function showSearchList(q){
   if (ms.length > 10){
     const d = document.createElement('div');
     d.className = 'search-item s-more';
-    d.textContent = `… 共 ${ms.length} 条结果，仅显示前 10 条`;
+    d.textContent = L.more(ms.length);
     searchList.appendChild(d);
   }
   searchList.style.display = 'block';
@@ -661,7 +696,7 @@ document.getElementById('collapse-select').addEventListener('change', ev => {
 });
 document.getElementById('btn-theme').onclick = ev => {
   colorMode = !colorMode;
-  ev.target.textContent = colorMode ? '黑白' : '彩色';
+  ev.target.textContent = colorMode ? L.mono : L.color;
   ev.target.classList.toggle('active', colorMode);
   if (DATA){ render(DATA); doFit(); }   // 重渲染后按当前内容边界居中显示
 };
@@ -708,18 +743,18 @@ function exportSvg(){
   clone.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
   clone.setAttribute('width', vb.w); clone.setAttribute('height', vb.h);
   const s = new XMLSerializer().serializeToString(clone);
-  download(new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + s], {type:'image/svg+xml'}), '架构图.svg');
+  download(new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + s], {type:'image/svg+xml'}), L.fileName + '.svg');
 }
 function exportPng(){
   renderToCanvas(exportBounds(), 3, cv =>
-    cv.toBlob(b => download(b, '架构图.png'), 'image/png'));
+    cv.toBlob(b => download(b, L.fileName + '.png'), 'image/png'));
 }
 function exportPdf(){
   const vb = exportBounds();
   renderToCanvas(vb, 2, cv =>
     cv.toBlob(b => b.arrayBuffer().then(buf => {
       const pdf = buildPdf(new Uint8Array(buf), cv.width, cv.height, Math.round(vb.w), Math.round(vb.h));
-      download(new Blob([pdf], {type:'application/pdf'}), '架构图.pdf');
+      download(new Blob([pdf], {type:'application/pdf'}), L.fileName + '.pdf');
     }), 'image/jpeg', 0.95));
 }
 /* 零依赖生成单页 PDF: 内嵌 JPEG(DCTDecode), 页面尺寸 = 图表 pt 尺寸 */
