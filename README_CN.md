@@ -34,9 +34,9 @@
 
 | 股权架构图（VIE，彩色模式） | 组织架构图 |
 |:---:|:---:|
-| ![股权架构图示例](docs/demo/demo_equity_cn_color.png) | ![组织架构图示例](docs/demo/demo_org_cn.png) |
+| ![股权架构图示例](docs/demo/demo_equity_en.png) | ![组织架构图示例](docs/demo/demo_org_en.png) |
 
-可交互 HTML 演示（下载后用浏览器打开）：[股权架构图示例](docs/demo/demo_equity_en.html) · [Equity Chart Demo](docs/demo/demo_equity_en.html) · [组织架构图示例](docs/demo/demo_org_cn.html) · [Org Chart Demo](docs/demo/demo_org_en.html)
+可交互 HTML 演示（下载后用浏览器打开）：[股权架构图示例](docs/demo/demo_equity_en.html) · [Equity Chart Demo](docs/demo/demo_equity_en.html) · [Org Chart Demo](docs/demo/demo_org_en.html)
 
 ## 快速开始
 
