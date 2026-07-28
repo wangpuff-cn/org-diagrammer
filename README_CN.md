@@ -36,7 +36,7 @@
 |:---:|:---:|
 | ![股权架构图示例](docs/demo/demo_equity_en.png) | ![组织架构图示例](docs/demo/demo_org_en.png) |
 
-可交互 HTML 演示（下载后用浏览器打开）：[Equity Chart Demo](docs/demo/demo_equity_en.html) · [Org Chart Demo](docs/demo/demo_org_en.html)
+可交互 HTML 演示（点击在线预览）：[Equity Chart Demo](https://wangpuff-cn.github.io/org-diagrammer/demo/demo_equity_en.html) · [Org Chart Demo](https://wangpuff-cn.github.io/org-diagrammer/demo/demo_org_en.html)
 
 ## 快速开始
 

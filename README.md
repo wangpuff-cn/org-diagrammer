@@ -36,7 +36,7 @@ One Excel in, one interactive diagram (standalone HTML) out. Fully offline, zero
 |:---:|:---:|
 | ![Equity chart demo](docs/demo/demo_equity_en.png) | ![Org chart demo](docs/demo/demo_org_en.png) |
 
-Interactive HTML demos (download & open in a browser): [Equity Chart Demo](docs/demo/demo_equity_en.html) · [Org Chart Demo](docs/demo/demo_org_en.html)
+Interactive HTML demos (live preview): [Equity Chart Demo](https://wangpuff-cn.github.io/org-diagrammer/demo/demo_equity_en.html) · [Org Chart Demo](https://wangpuff-cn.github.io/org-diagrammer/demo/demo_org_en.html)
 
 ## Quick start
 
