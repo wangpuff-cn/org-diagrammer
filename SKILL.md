@@ -35,7 +35,6 @@ description: >
 ```
 org-diagrammer/
 ├── SKILL.md                           ← this file (agent guide, English)
-├── SKILL_CN.md                        ← 中文调用指引
 ├── README.md / README_EN.md           ← user documentation
 ├── scripts/
 │   └── build_equity_json.py           ← core: Excel → layout JSON / standalone HTML (needs openpyxl only)
