@@ -36,7 +36,7 @@ One Excel in, one interactive diagram (standalone HTML) out. Fully offline, zero
 |:---:|:---:|
 | ![Equity chart demo](docs/demo/demo_equity_cn_color.png) | ![Org chart demo](docs/demo/demo_org_en.png) |
 
-Interactive HTML demos (download & open in a browser): [股权架构图示例](docs/demo/demo_equity_cn.html) · [Equity Chart Demo](docs/demo/demo_equity_en.html) · [组织架构图示例](docs/demo/demo_org_cn.html) · [Org Chart Demo](docs/demo/demo_org_en.html)
+Interactive HTML demos (download & open in a browser): [股权架构图示例](docs/demo/demo_equity_en.html) · [Equity Chart Demo](docs/demo/demo_equity_en.html) · [组织架构图示例](docs/demo/demo_org_cn.html) · [Org Chart Demo](docs/demo/demo_org_en.html)
 
 ## Quick start
 
