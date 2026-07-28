@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 本地测试输出（生成的架构图不进仓库；前端模板除外）
+/out/
+/test/
+*.html
+!assets/widget-template/index.html
+
+# 编辑器
+.vscode/
+.idea/

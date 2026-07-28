@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>/*__CHART_TITLE__*/架构图</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; font-family:"Microsoft YaHei","PingFang SC","STHeiti",sans-serif; background:#fff; }
+  #stage { width:100%; height:100%; cursor:grab; user-select:none; }
+  #stage.dragging { cursor:grabbing; }
+  #toolbar, #toolbar-right { position:absolute; top:10px; display:flex; gap:6px; z-index:10; }
+  #toolbar { left:10px; }
+  #toolbar-right { right:10px; }
+  #toolbar button, #toolbar-right button { padding:5px 10px; font-size:12px; border:1px solid #d0d0d0; border-radius:6px;
+    background:#fff; cursor:pointer; color:#1a1a1a; }
+  #toolbar button:hover, #toolbar-right button:hover { background:#f2f2f2; }
+  #toolbar button.active { background:#1a1a1a; color:#fff; border-color:#1a1a1a; }
+  #btn-zoom-in, #btn-zoom-out { width:30px; padding:5px 0; text-align:center; }
+  #toolbar select, #toolbar-right select { padding:5px 6px; font-size:12px; border:1px solid #d0d0d0; border-radius:6px;
+    background:#fff; color:#1a1a1a; cursor:pointer; }
+  #toolbar-right input#search-box { padding:5px 10px; font-size:12px; border:1px solid #d0d0d0;
+    border-radius:6px; width:260px; color:#1a1a1a; outline:none; }
+  #toolbar-right input#search-box:focus { border-color:#1a1a1a; }
+  #search-wrap { position:relative; }
+  #search-list { position:absolute; top:calc(100% + 4px); right:0; width:260px; max-height:320px;
+    overflow-y:auto; background:#fff; border:1px solid #d0d0d0; border-radius:6px; z-index:30;
+    box-shadow:0 4px 12px rgba(0,0,0,.12); }
+  .search-item { padding:6px 10px; font-size:12px; color:#1a1a1a; cursor:pointer; }
+  .search-item:hover { background:#f2f2f2; }
+  .search-item .s-sub { color:#999; font-size:11px; margin-left:6px; }
+  .search-item.s-more { color:#999; cursor:default; text-align:center; }
+  .search-item.s-more:hover { background:#fff; }
+  #tooltip { position:absolute; display:none; pointer-events:none; z-index:20; max-width:280px;
+    background:rgba(26,26,26,.92); color:#fff; font-size:12px; line-height:1.6;
+    padding:8px 10px; border-radius:6px; }
+  #tooltip .t-name { font-weight:bold; font-size:13px; }
+  #tooltip .t-geo { color:#bbb; }
+  .dim { opacity:.12; transition:opacity .15s; }
+  .lit { opacity:1; transition:opacity .15s; }
+  .wire.hl { stroke-width:2.6; }   /* 搜索/点击高亮链路加粗（取消高亮即移除该类恢复正常） */
+  .badge { cursor:pointer; }
+  .badge circle { fill:#fff; stroke:#1a1a1a; stroke-width:.9; }
+  .badge:hover circle { fill:#f0f0f0; }
+  .badge text { font-size:9px; font-weight:bold; fill:#1a1a1a; text-anchor:middle; dominant-baseline:central; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <button id="btn-theme">彩色</button>
+  <select id="collapse-select"><option value="" disabled selected>层级折叠</option></select>
+  <select id="zoom-select">
+    <option value="" disabled selected>缩放</option>
+    <option value="fit">适应窗口</option>
+    <option value="50">50%</option>
+    <option value="75">75%</option>
+    <option value="100">100%</option>
+    <option value="150">150%</option>
+    <option value="200">200%</option>
+    <option value="300">300%</option>
+    <option value="400">400%</option>
+    <option value="500">500%</option>
+    <option value="600">600%</option>
+    <option value="700">700%</option>
+    <option value="800">800%</option>
+    <option value="1000">1000%</option>
+  </select>
+  <button id="btn-zoom-in">＋</button>
+  <button id="btn-zoom-out">−</button>
+</div>
+<div id="toolbar-right">
+  <div id="search-wrap">
+    <input id="search-box" type="text" placeholder="搜索节点…" autocomplete="off">
+    <div id="search-list" style="display:none"></div>
+  </div>
+  <select id="export-select">
+    <option value="" disabled selected>导出文件</option>
+    <option value="svg">导出 SVG</option>
+    <option value="png">导出 PNG</option>
+    <option value="pdf">导出 PDF</option>
+  </select>
+</div>
+<svg id="stage"></svg>
+<div id="tooltip"></div>
+<script>
+/* ================================================================
+ * 数据注入(二选一，优先级从高到低):
+ * 1. Widget slots: 宿主环境按 widget skill 的 slots 机制调用
+ *    window.renderEquity(data) 推送数据 —— 本文件暴露该全局函数。
+ * 2. 内联数据: 生成 Widget 时把下方 null 替换为完整 JSON 字面量。
+ * ================================================================ */
+const EQUITY_DATA_INLINE = /*__EQUITY_DATA__*/ null;
+
+const MONO = {
+  offshore:{face:'#FFFFFF',text:'#1a1a1a',edge:'#1a1a1a',lw:0.8},
+  natural_person:{face:'#FFFFFF',text:'#1a1a1a',edge:'#1a1a1a',lw:0.8},
+  domestic:{face:'#FFFFFF',text:'#1a1a1a',edge:'#1a1a1a',lw:0.8},
+  listed:{face:'#FFFFFF',text:'#1a1a1a',edge:'#000000',lw:1.4},
+  org:{face:'#FFFFFF',text:'#1a1a1a',edge:'#1a1a1a',lw:0.8},
+};
+const COLOR = {
+  offshore:{face:'#64c466',text:'#FFFFFF',edge:'#2d6b2f',lw:0.8},
+  natural_person:{face:'#ee8b00',text:'#FFFFFF',edge:'#a05e00',lw:0.8},
+  domestic:{face:'#f6cd45',text:'#1a1a1a',edge:'#a88200',lw:0.8},
+  listed:{face:'#64c466',text:'#FFFFFF',edge:'#000000',lw:1.4},
+  org:{face:'#5b9bd5',text:'#FFFFFF',edge:'#2e75b6',lw:0.8},
+};
+const LINE_COLOR = '#1a1a1a', LINE_LW = 0.8, GEO_COLOR = '#666666', GEO_FONT = 12;
+
+let DATA = null, colorMode = null, selected = null;
+const collapsed = new Set();   // 折叠状态跨 render 保留(主题切换不丢失)
+const svg = document.getElementById('stage');
+const tip = document.getElementById('tooltip');
+const NS = 'http://www.w3.org/2000/svg';
+let view = {x:0, y:0, w:100, h:100};
+
+function el(tag, attrs, parent){
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function textColorFor(hex){
+  if (!hex) return '#1a1a1a';
+  const r=parseInt(hex.slice(1,3),16)/255, g=parseInt(hex.slice(3,5),16)/255, b=parseInt(hex.slice(5,7),16)/255;
+  return (0.299*r+0.587*g+0.114*b) < 0.55 ? '#FFFFFF' : '#1a1a1a';
+}
+function nodeColors(n){
+  // 黑白模式: 一律白底黑框(打印友好); 彩色模式: I 列填充色优先, 否则按类型配色
+  if (!colorMode) return MONO[n.type] || MONO.domestic;
+  if (n.face) return {face:n.face, text:n.text||textColorFor(n.face), edge:'#1a1a1a', lw:0.8};
+  return COLOR[n.type] || COLOR.domestic;
+}
+
+function render(data){
+  DATA = data; selected = null;
+  if (colorMode === null){   // 首次渲染: 有 I 列填充色则默认彩色, 否则默认黑白
+    colorMode = data.nodes.some(n => n.face);
+    const b = document.getElementById('btn-theme');
+    b.textContent = colorMode ? '黑白' : '彩色';
+    b.classList.toggle('active', colorMode);
+  }
+  svg.innerHTML = '';
+  const vb = data.viewBox;
+  view = {x:vb.x, y:vb.y, w:vb.w, h:vb.h};
+  applyView();
+
+  const defs = el('defs', {}, svg);
+  const marker = el('marker', {id:'arrow', viewBox:'0 0 10 10', refX:9, refY:5,
+    markerWidth:7, markerHeight:7, orient:'auto-start-reverse'}, defs);
+  el('path', {d:'M0,0 L10,5 L0,10 z', fill:LINE_COLOR}, marker);
+
+  const gWires = el('g', {id:'g-wires'}, svg);
+  const gNodes = el('g', {id:'g-nodes'}, svg);
+  const gLabels = el('g', {id:'g-labels'}, svg);
+
+  data.wires.forEach(w => {
+    el('polyline', {
+      points: w.pts.map(p => p.join(',')).join(' '),
+      fill:'none', stroke:LINE_COLOR, 'stroke-width':LINE_LW,
+      'stroke-dasharray': w.style==='dashed' ? '4,3' : 'none',
+      'marker-end': w.arrow ? 'url(#arrow)' : 'none',
+      'data-from': w.from, 'data-to': w.to, class:'wire lit',
+    }, gWires);
+  });
+
+  data.labels.forEach(l => {
+    const t = el('text', {x:l.x, y:l.y, 'font-size':8, 'font-weight':'bold',
+      fill:LINE_COLOR, 'dominant-baseline':'middle', class:'label lit',
+      'data-from': l.from || '', 'data-to': l.to || ''}, gLabels);
+    t.textContent = l.text;
+  });
+
+  data.nodes.forEach(n => {
+    const c = nodeColors(n);
+    const g = el('g', {class:'node lit', 'data-id':n.id, style:'cursor:pointer'}, gNodes);
+    const r = n.h * 0.22;   // 长方形 + 适度圆角(与 matplotlib 版 rounding_size 一致)
+    el('rect', {x:n.x-n.w/2, y:n.y-n.h/2, width:n.w, height:n.h, rx:r, ry:r,
+      fill:c.face, stroke:c.edge, 'stroke-width':c.lw}, g);
+    const nameT = el('text', {x:n.x, y:n.geo ? n.y-n.h*0.18 : n.y,
+      'text-anchor':'middle', 'dominant-baseline':'middle',
+      'font-size':n.nameFont, 'font-weight':'bold', fill:c.text}, g);
+    nameT.textContent = n.name;
+    if (n.geo){
+      const geoT = el('text', {x:n.x, y:n.y+n.h*0.28, 'text-anchor':'middle',
+        'dominant-baseline':'middle', 'font-size':GEO_FONT,
+        fill: c.text==='#FFFFFF' ? '#EEEEEE' : GEO_COLOR}, g);
+      geoT.textContent = n.geo;
+    }
+    g.addEventListener('mouseenter', ev => showTip(n, ev));
+    g.addEventListener('mousemove', ev => moveTip(ev));
+    g.addEventListener('mouseleave', hideTip);
+    g.addEventListener('click', ev => { ev.stopPropagation(); searchBox.value=''; select(n.id); });
+  });
+
+  // 有下游分支的节点: 底边加折叠/展开徽章
+  data.nodes.forEach(n => {
+    if (!data.edges.some(e => e.from === n.id)) return;
+    const g = el('g', {class:'badge lit', 'data-id':n.id}, gNodes);
+    el('circle', {cx:n.x, cy:n.y+n.h/2, r:7}, g);
+    el('text', {x:n.x, y:n.y+n.h/2}, g).textContent = '−';
+    g.addEventListener('click', ev => {
+      ev.stopPropagation();
+      collapsed.has(n.id) ? collapsed.delete(n.id) : collapsed.add(n.id);
+      applyCollapse();
+      ensureVisible(n.id);   // 重排后把被操作节点保持在视野内
+    });
+  });
+  buildCollapseOptions(data);
+  applyCollapse();
+}
+
+/* 折叠下拉: 选项按该图实际层级生成 */
+function hasKids(id){ return DATA.edges.some(e => e.from === id); }
+function buildCollapseOptions(data){
+  const cs = document.getElementById('collapse-select');
+  cs.innerHTML = '<option value="" disabled selected>层级折叠</option>' +
+    '<option value="expand-all">全部展开</option>' +
+    '<option value="collapse-all">全部折叠</option>';
+  const maxL = Math.max(...data.nodes.map(n => n.layer || 0));
+  for (let k = 0; k < maxL; k++){
+    const o = document.createElement('option');
+    o.value = 'level-' + k;
+    o.textContent = '折叠至' + k + '层';
+    cs.appendChild(o);
+  }
+}
+
+/* 重排后视野平移(不改变缩放比例), 把指定节点纳入可视范围 */
+function ensureVisible(id){
+  const n = DATA.nodes.find(x => x.id === id);
+  if (!n) return;
+  const x = curX[id] !== undefined ? curX[id] : n.x;
+  const y = n.y, mx = n.w * 0.3, my = n.h * 0.5;
+  let dx = 0, dy = 0;
+  if (x - n.w/2 < view.x) dx = (x - n.w/2 - mx) - view.x;
+  else if (x + n.w/2 > view.x + view.w) dx = (x + n.w/2 + mx) - (view.x + view.w);
+  if (y - n.h/2 < view.y) dy = (y - n.h/2 - my) - view.y;
+  else if (y + n.h/2 > view.y + view.h) dy = (y + n.h/2 + my) - (view.y + view.h);
+  if (dx || dy){ view.x += dx; view.y += dy; applyView(); }
+}
+
+/* ---------- 分支折叠 / 展开(折叠后可见节点自动重排, 恢复正常间距) ---------- */
+function descOf(id){
+  const s = reachable(id, 'down');
+  s.delete(id);
+  return s;
+}
+function hiddenSet(){
+  const hidden = new Set();
+  collapsed.forEach(id => descOf(id).forEach(d => hidden.add(d)));
+  return hidden;
+}
+function applyCollapse(){
+  if (!DATA) return;
+  if (selected && hiddenSet().has(selected)) select(null);
+  relayout();
+  svg.querySelectorAll('.badge').forEach(b => {
+    const id = b.dataset.id;
+    b.querySelector('text').textContent = collapsed.has(id) ? '+' + descOf(id).size : '−';
+  });
+  // 折叠重排会重建连线, 搜索高亮需要重放（沿用上次精确选中项）
+  if (searchBox.value.trim()) applySearch(searchBox.value, applySearch._ids);
+}
+
+/* 折叠状态变化时: 对可见节点重跑 tidy-tree(父居中于可见子女, 叶子顺序铺开),
+ * 重路由连线, 并把视野适配到可见内容。y 不变, 只调 x。 */
+const X_GAP = 25.2;   // H_UNIT*0.6
+function relayout(){
+  const hidden = hiddenSet();
+  const vis = DATA.nodes.filter(n => !hidden.has(n.id));
+  const visIds = new Set(vis.map(n => n.id));
+  const nb = {};
+  DATA.nodes.forEach(n => nb[n.id] = n);
+  const childMap = {}, parentMap = {};
+  DATA.edges.forEach(e => {
+    if (!visIds.has(e.from) || !visIds.has(e.to)) return;
+    (childMap[e.from] = childMap[e.from] || []).push(e.to);
+    if (!(e.to in parentMap)) parentMap[e.to] = e.from;
+  });
+  const cursor = {v: 0}, nx = {};
+  function shift(id, dx){           // 子树整体平移
+    if (nx[id] === undefined) return;
+    nx[id] += dx;
+    (childMap[id] || []).forEach(c => shift(c, dx));
+  }
+  function place(id){
+    // 子树占位 = max(自身宽, 子代跨度)；父比子树宽时子代块右移居中，
+    // 否则窄子树的宽父会吃掉与右侧兄弟的间距（展开时间距过紧的根因）
+    const w = nb[id].w;
+    const kids = (childMap[id] || []).filter(c => visIds.has(c));
+    if (!kids.length){
+      nx[id] = cursor.v + w / 2;
+      cursor.v += w + X_GAP;
+    } else {
+      const start = cursor.v;
+      const kxs = kids.map(place);
+      const span = cursor.v - start - X_GAP;
+      if (w > span){
+        const dx = (w - span) / 2;
+        kids.forEach(k => shift(k, dx));
+        nx[id] = start + w / 2;
+        cursor.v = start + w + X_GAP;
+      } else {
+        nx[id] = (Math.min(...kxs) + Math.max(...kxs)) / 2;
+      }
+    }
+    return nx[id];
+  }
+  vis.filter(n => !(n.id in parentMap)).forEach(n => place(n.id));
+  vis.forEach(n => { if (!(n.id in nx)) place(n.id); });
+
+  // 平移节点与徽章(x 差量), 隐藏不可见节点
+  curX = {};
+  svg.querySelectorAll('.node,.badge').forEach(g => {
+    const id = g.dataset.id;
+    const hide = hidden.has(id);
+    g.style.display = hide ? 'none' : '';
+    if (!hide){
+      g.setAttribute('transform', `translate(${nx[id] - nb[id].x},0)`);
+      curX[id] = nx[id];
+    }
+  });
+
+  reroute(visIds, nx, nb);
+  // 注意: 不做视野自动适配——折叠/展开只重排内容, 画面大小比例保持不变(视野由用户自己控制)
+}
+
+function reroute(visIds, nx, nb){
+  const gWires = svg.querySelector('#g-wires');
+  const gLabels = svg.querySelector('#g-labels');
+  gWires.innerHTML = ''; gLabels.innerHTML = '';
+  const H = nb[DATA.nodes[0].id].h;
+  const top = id => ({x: nx[id], y: nb[id].y - H/2});
+  const bot = id => ({x: nx[id], y: nb[id].y + H/2});
+  const labelMap = {};
+  DATA.labels.forEach(l => { labelMap[l.from + '→' + l.to] = l.text; });
+  const edges = DATA.edges.filter(e => visIds.has(e.from) && visIds.has(e.to));
+  function addWire(pts, style, arrow, from, to){
+    el('polyline', {points: pts.map(p => p.join(',')).join(' '), fill:'none',
+      stroke:LINE_COLOR, 'stroke-width':LINE_LW,
+      'stroke-dasharray': style==='dashed' ? '4,3' : 'none',
+      'marker-end': arrow ? 'url(#arrow)' : 'none',
+      'data-from': from, 'data-to': to, class:'wire lit'}, gWires);
+  }
+  function addLabel(x, y, text, from, to){
+    if (!text) return;
+    const t = el('text', {x: x+4, y: y, 'font-size':8, 'font-weight':'bold',
+      fill:LINE_COLOR, 'dominant-baseline':'middle', class:'label lit',
+      'data-from':from, 'data-to':to}, gLabels);
+    t.textContent = text;
+  }
+  const consumed = new Set();
+  const byChild = {}, byParent = {};
+  edges.forEach(e => {
+    (byChild[e.to] = byChild[e.to] || []).push(e);
+    (byParent[e.from] = byParent[e.from] || []).push(e);
+  });
+  // fan-in: 一子多父(父同排)共用汇线
+  Object.values(byChild).forEach(es => {
+    if (es.length < 2) return;
+    const groups = {};
+    es.forEach(e => { (groups[nb[e.from].y] = groups[nb[e.from].y] || []).push(e); });
+    Object.values(groups).forEach(g => {
+      if (g.length < 2) return;
+      const c = top(g[0].to), ybus = (bot(g[0].from).y + c.y) / 2;
+      const xs = g.map(e => bot(e.from).x);
+      g.forEach(e => {
+        const b = bot(e.from);
+        addWire([[b.x,b.y],[b.x,ybus]], e.style, false, e.from, e.to);
+        addLabel(b.x, (b.y+ybus)/2, labelMap[e.from+'→'+e.to], e.from, e.to);
+        consumed.add(e);
+      });
+      addWire([[Math.min(...xs, c.x),ybus],[Math.max(...xs, c.x),ybus]], g[0].style, false, g.map(e=>e.from).join('\x01'), g[0].to);
+      addWire([[c.x,ybus],[c.x,c.y]], g[0].style, true, g[0].from, g[0].to);
+    });
+  });
+  // fan-out / 一对一
+  Object.values(byParent).forEach(es0 => {
+    const es = es0.filter(e => !consumed.has(e));
+    if (!es.length) return;
+    const groups = {};
+    es.forEach(e => { (groups[nb[e.to].y] = groups[nb[e.to].y] || []).push(e); });
+    Object.values(groups).forEach(g => {
+      const p = bot(g[0].from);
+      if (g.length === 1){
+        const e = g[0], c = top(e.to), ybus = (p.y + c.y) / 2;
+        if (Math.abs(p.x - c.x) < 1){
+          addWire([[p.x,p.y],[c.x,c.y]], e.style, true, e.from, e.to);
+          addLabel(p.x, (p.y+c.y)/2, labelMap[e.from+'→'+e.to], e.from, e.to);
+        } else {
+          addWire([[p.x,p.y],[p.x,ybus]], e.style, false, e.from, e.to);
+          addWire([[p.x,ybus],[c.x,ybus]], e.style, false, e.from, e.to);
+          addWire([[c.x,ybus],[c.x,c.y]], e.style, true, e.from, e.to);
+          addLabel(c.x, (ybus+c.y)/2, labelMap[e.from+'→'+e.to], e.from, e.to);
+        }
+      } else {
+        const cs = g.map(e => ({e, c: top(e.to)}));
+        const ybus = (p.y + cs[0].c.y) / 2;
+        // 不画通长干线：父竖线归属全部子节点；水平段按子节点各自绘制(父正下方→子正上方)，
+        // 重叠部分视觉等同一条干线，但高亮只亮链路那一段，不再溢出
+        const allTo = g.map(e => e.to).join('\x01');
+        addWire([[p.x,p.y],[p.x,ybus]], g[0].style, false, g[0].from, allTo);
+        cs.forEach(({e, c}) => {
+          addWire([[Math.min(p.x,c.x),ybus],[Math.max(p.x,c.x),ybus]], e.style, false, e.from, e.to);
+          addWire([[c.x,ybus],[c.x,c.y]], e.style, true, e.from, e.to);
+          addLabel(c.x, (ybus+c.y)/2, labelMap[e.from+'→'+e.to], e.from, e.to);
+        });
+      }
+    });
+  });
+}
+
+/* ---------- tooltip ---------- */
+function holdersOf(id){
+  return DATA.edges.filter(e => e.to===id)
+    .map(e => `${e.from} ${e.ratio || (e.style==='dashed' ? '协议控制' : '')}`.trim());
+}
+function showTip(n, ev){
+  const typeName = {offshore:'境外主体', natural_person:'自然人', domestic:'境内主体', listed:'上市主体', org:'组织'}[n.type] || '';
+  let html = `<div class="t-name">${esc(n.name)}</div>`;
+  if (n.geo) html += `<div class="t-geo">${esc(n.geo)}${typeName ? ' · '+typeName : ''}</div>`;
+  else if (typeName) html += `<div class="t-geo">${typeName}</div>`;
+  if (n.type === 'org'){
+    // 组织节点: 悬停展示 职能/负责人/人数/上级
+    if (n.function) html += `<div>组织职能:${esc(n.function)}</div>`;
+    if (n.leader) html += `<div>负责人:${esc(n.leader)}</div>`;
+    if (n.headcount !== undefined) html += `<div>人数:${esc(n.headcount)} 人</div>`;
+    else {
+      if (n.regular !== undefined) html += `<div>正编人数:${esc(n.regular)} 人</div>`;
+      if (n.outsourced !== undefined) html += `<div>外包人数:${esc(n.outsourced)} 人</div>`;
+    }
+    const ups = DATA.edges.filter(e => e.to === n.id).map(e => e.from);
+    html += ups.length ? `<div>上级:${esc(ups.join(' / '))}</div>` : '<div>顶层组织</div>';
+  } else {
+    const hs = holdersOf(n.id);
+    if (n.function) html += `<div>主体业务及职能:${esc(n.function)}</div>`;
+    html += hs.length ? `<div>股东:${esc(hs.join(' / '))}</div>` : '<div>顶层主体</div>';
+  }
+  tip.innerHTML = html;
+  tip.style.display = 'block';
+  moveTip(ev);
+}
+function moveTip(ev){
+  tip.style.left = (ev.clientX + 14) + 'px';
+  tip.style.top = (ev.clientY + 14) + 'px';
+}
+function hideTip(){ tip.style.display = 'none'; }
+function esc(s){ return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+/* ---------- 穿透高亮(向上溯源 + 向下穿透) ---------- */
+/* 搜索高亮: 命中节点(名称/负责人)及其完整上下游链保持高亮, 其余变淡(与点击穿透一致) */
+function applySearch(q, targetIds){
+  q = (q || '').trim();
+  applySearch._ids = targetIds || null;   // 记录精确选中项，供折叠重排后重放
+  if (!q || !DATA){ applySearch._ids = null; select(null); return; }
+  const lower = q.toLowerCase();
+  const litSet = new Set();
+  // targetIds 传入时(从下拉精确选中某条结果)：只高亮该节点 + 向上穿透，
+  // 不再按子串匹配（避免下层同名前缀节点被误命中）
+  const targets = targetIds
+    ? DATA.nodes.filter(n => targetIds.includes(n.id))
+    : DATA.nodes.filter(n => n.name.toLowerCase().includes(lower) ||
+                             (n.leader || '').toLowerCase().includes(lower));
+  targets.forEach(n => {
+    // 搜索高亮: 命中节点 + 向上穿透至顶层（不下透；点击节点仍是双向穿透）
+    reachable(n.id, 'up').forEach(x => litSet.add(x));
+  });
+  selected = null;
+  svg.querySelectorAll('.node,.wire,.label').forEach(e => {
+    let lit = true;
+    if (e.classList.contains('node')) lit = litSet.has(e.dataset.id);
+    else if (e.classList.contains('wire')) lit = toHit(e.dataset.from, litSet) && toHit(e.dataset.to, litSet);
+    e.classList.toggle('lit', lit);
+    e.classList.toggle('dim', !lit);
+    if (e.classList.contains('wire')) e.classList.toggle('hl', lit);   // 点亮链路加粗
+  });
+}
+const searchBox = document.getElementById('search-box');
+const searchList = document.getElementById('search-list');
+function searchMatches(q){
+  const lower = q.toLowerCase();
+  return DATA.nodes.filter(n => n.name.toLowerCase().includes(lower) ||
+                                (n.leader || '').toLowerCase().includes(lower));
+}
+function hideSearchList(){ searchList.style.display = 'none'; }
+/* 缩放到指定节点组: 视野宽度 = 节点组横向跨度, 放大倍数不超过 capRatio(相对适应窗口, 即 500%) */
+function zoomToNodes(ids, capRatio){
+  const nb = {};
+  DATA.nodes.forEach(n => nb[n.id] = n);
+  const vis = ids.filter(id => nb[id] && !hiddenSet().has(id));
+  if (!vis.length) return;
+  const xs = vis.map(id => curX[id] !== undefined ? curX[id] : nb[id].x);
+  const ys = vis.map(id => nb[id].y);
+  const maxW = Math.max(...vis.map(id => nb[id].w));
+  const x1 = Math.min(...xs.map((x, i) => x - nb[vis[i]].w/2));
+  const x2 = Math.max(...xs.map((x, i) => x + nb[vis[i]].w/2));
+  const fit = exportBounds();
+  let w = (x2 - x1) + maxW * 0.6;          // 横向跨度 + 少量边距
+  w = Math.max(w, fit.w / capRatio);       // 放大不超过 capRatio 倍
+  const aspect = svg.clientHeight / svg.clientWidth;
+  const cx = (x1 + x2) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+  view = {x: cx - w/2, y: cy - w*aspect/2, w: w, h: w*aspect};
+  applyView();
+}
+/* 选中某个搜索结果: 高亮 + 以"目标节点+其上层节点"的横向宽度放大(≤500%) */
+function pickSearchResult(n){
+  searchBox.value = n.name;
+  hideSearchList();
+  applySearch(n.name, [n.id]);   // 精确命中所选节点，不下透、不误伤同名前缀下层
+  const parents = DATA.edges.filter(e => e.to === n.id).map(e => e.from);
+  zoomToNodes([n.id, ...parents], 5);
+}
+function showSearchList(q){
+  const ms = searchMatches(q);
+  searchList.innerHTML = '';
+  if (!ms.length){ hideSearchList(); return; }
+  ms.slice(0, 10).forEach(n => {
+    const d = document.createElement('div');
+    d.className = 'search-item';
+    const sub = n.leader ? `<span class="s-sub">${esc(n.leader)}</span>` : '';
+    d.innerHTML = esc(n.name) + sub;
+    d.addEventListener('mousedown', ev => {   // mousedown 先于 blur, 保证点击生效
+      ev.preventDefault();
+      pickSearchResult(n);
+    });
+    searchList.appendChild(d);
+  });
+  if (ms.length > 10){
+    const d = document.createElement('div');
+    d.className = 'search-item s-more';
+    d.textContent = `… 共 ${ms.length} 条结果，仅显示前 10 条`;
+    searchList.appendChild(d);
+  }
+  searchList.style.display = 'block';
+}
+searchBox.addEventListener('input', () => {
+  const q = searchBox.value;
+  applySearch(q);
+  q.trim() ? showSearchList(q.trim()) : hideSearchList();
+});
+searchBox.addEventListener('blur', () => setTimeout(hideSearchList, 150));
+searchBox.addEventListener('keydown', ev => {
+  if (ev.key === 'Escape') hideSearchList();
+  else if (ev.key === 'Enter'){   // 回车 = 选第一个结果
+    const ms = searchMatches(searchBox.value.trim());
+    if (ms.length) pickSearchResult(ms[0]);
+    hideSearchList();
+  }
+});
+
+/* ---------- 穿透高亮(向上溯源 + 向下穿透) ---------- */
+/* 连线命中: data-to 可能是空格分隔的多个子节点(共用干线段), 任一亮即亮 */
+function toHit(ds, set){ return (ds || '').split('\x01').some(t => set.has(t)); }
+function reachable(start, dir){
+  const seen = new Set([start]), q = [start];
+  while (q.length){
+    const cur = q.shift();
+    DATA.edges.forEach(e => {
+      const nxt = dir==='up' ? (e.to===cur ? e.from : null) : (e.from===cur ? e.to : null);
+      if (nxt && !seen.has(nxt)){ seen.add(nxt); q.push(nxt); }
+    });
+  }
+  return seen;
+}
+function select(id){
+  selected = id;
+  const all = svg.querySelectorAll('.node,.wire,.label');
+  if (!id){ all.forEach(e => { e.classList.add('lit'); e.classList.remove('dim'); e.classList.remove('hl'); }); return; }
+  const up = reachable(id,'up'), down = reachable(id,'down');
+  const litSet = new Set([...up, ...down]);
+  all.forEach(e => {
+    let lit = false;
+    if (e.classList.contains('node')) lit = litSet.has(e.dataset.id);
+    else if (e.classList.contains('wire')) lit = toHit(e.dataset.from, up) && toHit(e.dataset.to, up) || toHit(e.dataset.from, down) && toHit(e.dataset.to, down);
+    else lit = true; // 比例标注保持可见
+    e.classList.toggle('lit', lit);
+    e.classList.toggle('dim', !lit);
+    if (e.classList.contains('wire')) e.classList.toggle('hl', lit);   // 点亮链路加粗
+  });
+}
+
+/* ---------- 平移 / 缩放 ---------- */
+function applyView(){ svg.setAttribute('viewBox', `${view.x} ${view.y} ${view.w} ${view.h}`); }
+let drag = null, dragMoved = false;
+svg.addEventListener('pointerdown', ev => {
+  // 注意: 不要在这里立即 setPointerCapture —— 捕获会把随后的 click 重定向到 svg,
+  // 导致节点 click 被吞。只在确认开始拖拽(位移>3px)后才捕获。
+  drag = {x:ev.clientX, y:ev.clientY, vx:view.x, vy:view.y, captured:false};
+  dragMoved = false;
+});
+svg.addEventListener('pointermove', ev => {
+  if (!drag) return;
+  const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+  if (!drag.captured){
+    if (Math.abs(dx) + Math.abs(dy) < 3) return;
+    drag.captured = true;
+    svg.classList.add('dragging');
+    try { svg.setPointerCapture(ev.pointerId); } catch(_){}
+  }
+  dragMoved = true;
+  const k = view.w / svg.clientWidth;
+  view.x = drag.vx - dx * k;
+  view.y = drag.vy - dy * k;
+  applyView();
+});
+svg.addEventListener('pointerup', () => { drag = null; svg.classList.remove('dragging'); });
+// 拖拽结束后的那一次 click 是平移的副产物, 忽略; 真正的点击(未拖动)才响应
+svg.addEventListener('click', ev => {
+  if (dragMoved){ dragMoved = false; return; }
+  if (ev.target === svg) select(null);
+}, true);
+// 滚轮/手势缩放已禁用(易误触)，缩放只用工具栏 ＋/− 按钮
+function zoomBy(f){
+  // 以当前视野中心为锚点缩放
+  const cx = view.x + view.w / 2, cy = view.y + view.h / 2;
+  view.w *= f; view.h *= f;
+  view.x = cx - view.w / 2; view.y = cy - view.h / 2;
+  applyView();
+}
+
+/* ---------- 工具栏 ---------- */
+/* 缩放百分比基准: 100% = 当前可见内容恰好适应窗口(折叠重排后以实际边界为准, 内容居中) */
+function zoomToPct(pct){
+  if (!DATA) return;
+  const vb = exportBounds(), k = 100 / pct;
+  view = {
+    x: vb.x + vb.w/2 - vb.w*k/2,
+    y: vb.y + vb.h/2 - vb.h*k/2,
+    w: vb.w * k, h: vb.h * k,
+  };
+  applyView();
+}
+const zoomSelect = document.getElementById('zoom-select');
+zoomSelect.addEventListener('change', () => {
+  if (zoomSelect.value === 'fit'){ doFit(); zoomSelect.value = ''; }
+  else if (zoomSelect.value) zoomToPct(parseFloat(zoomSelect.value));
+});
+function doFit(){
+  if (!DATA) return;
+  view = exportBounds();   // 按当前可见内容的实际边界适配, 内容居中显示
+  applyView(); select(null);
+}
+document.getElementById('btn-zoom-in').onclick = () => { zoomSelect.value=''; zoomBy(1/1.35); };
+document.getElementById('btn-zoom-out').onclick = () => { zoomSelect.value=''; zoomBy(1.35); };
+document.getElementById('collapse-select').addEventListener('change', ev => {
+  if (!DATA) return;
+  const v = ev.target.value;
+  if (v === 'expand-all'){
+    collapsed.clear();
+  } else if (v === 'collapse-all'){
+    DATA.nodes.forEach(n => { if (hasKids(n.id)) collapsed.add(n.id); });
+  } else if (v.startsWith('level-')){
+    const k = parseInt(v.slice(6), 10);
+    collapsed.clear();
+    DATA.nodes.forEach(n => { if ((n.layer || 0) === k && hasKids(n.id)) collapsed.add(n.id); });
+  }
+  applyCollapse();
+  doFit();   // 层级折叠/展开后按当前展示内容的宽度适应窗口(居中)
+  ev.target.value = '';   // 回到占位态
+});
+document.getElementById('btn-theme').onclick = ev => {
+  colorMode = !colorMode;
+  ev.target.textContent = colorMode ? '黑白' : '彩色';
+  ev.target.classList.toggle('active', colorMode);
+  if (DATA){ render(DATA); doFit(); }   // 重渲染后按当前内容边界居中显示
+};
+function download(blob, name){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+/* 导出按"当前可见状态": 折叠隐藏的元素本就不渲染, 视野取可见节点的实际边界。
+ * curX 记录每个节点当前 x(relayout 会更新), 未折叠时即初始布局 x。 */
+let curX = {};
+function exportBounds(){
+  const hidden = hiddenSet();
+  const vis = DATA.nodes.filter(n => !hidden.has(n.id));
+  const xs = vis.map(n => curX[n.id] !== undefined ? curX[n.id] : n.x);
+  const ys = vis.map(n => n.y);
+  const maxW = Math.max(...vis.map(n => n.w)), H = vis[0].h;
+  return {
+    x: Math.min(...xs) - maxW/2 - H*0.5,
+    y: Math.min(...ys) - H,
+    w: Math.max(...xs) - Math.min(...xs) + maxW + H,
+    h: Math.max(...ys) - Math.min(...ys) + 2*H,
+  };
+}
+function renderToCanvas(vb, scale, cb){
+  const clone = svg.cloneNode(true);
+  clone.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+  clone.setAttribute('width', vb.w * scale); clone.setAttribute('height', vb.h * scale);
+  const s = new XMLSerializer().serializeToString(clone);
+  const img = new Image();
+  img.onload = () => {
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(vb.w * scale); cv.height = Math.round(vb.h * scale);
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(img, 0, 0);
+    cb(cv);
+  };
+  img.src = URL.createObjectURL(new Blob([s], {type:'image/svg+xml'}));
+}
+function exportSvg(){
+  const vb = exportBounds();
+  const clone = svg.cloneNode(true);
+  clone.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+  clone.setAttribute('width', vb.w); clone.setAttribute('height', vb.h);
+  const s = new XMLSerializer().serializeToString(clone);
+  download(new Blob(['<?xml version="1.0" encoding="UTF-8"?>\n' + s], {type:'image/svg+xml'}), '架构图.svg');
+}
+function exportPng(){
+  renderToCanvas(exportBounds(), 3, cv =>
+    cv.toBlob(b => download(b, '架构图.png'), 'image/png'));
+}
+function exportPdf(){
+  const vb = exportBounds();
+  renderToCanvas(vb, 2, cv =>
+    cv.toBlob(b => b.arrayBuffer().then(buf => {
+      const pdf = buildPdf(new Uint8Array(buf), cv.width, cv.height, Math.round(vb.w), Math.round(vb.h));
+      download(new Blob([pdf], {type:'application/pdf'}), '架构图.pdf');
+    }), 'image/jpeg', 0.95));
+}
+/* 零依赖生成单页 PDF: 内嵌 JPEG(DCTDecode), 页面尺寸 = 图表 pt 尺寸 */
+function buildPdf(jpeg, iw, ih, pw, ph){
+  const enc = new TextEncoder();
+  const parts = []; let len = 0;
+  const push = u => { parts.push(u); len += u.length; };
+  const str = t => push(enc.encode(t));
+  const offsets = [];
+  str('%PDF-1.4\n');
+  offsets[1] = len; str('1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\n');
+  offsets[2] = len; str('2 0 obj\n<</Type/Pages/Kids[3 0 R]/Count 1>>\nendobj\n');
+  offsets[3] = len; str(`3 0 obj\n<</Type/Page/Parent 2 0 R/MediaBox[0 0 ${pw} ${ph}]/Resources<</XObject<</Im1 4 0 R>>>>/Contents 5 0 R>>\nendobj\n`);
+  offsets[4] = len; str(`4 0 obj\n<</Type/XObject/Subtype/Image/Width ${iw}/Height ${ih}/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length ${jpeg.length}>>\nstream\n`);
+  push(jpeg); str('\nendstream\nendobj\n');
+  const content = `q\n${pw} 0 0 ${ph} 0 0 cm\n/Im1 Do\nQ\n`;
+  offsets[5] = len; str(`5 0 obj\n<</Length ${content.length}>>\nstream\n${content}endstream\nendobj\n`);
+  const xref = len;
+  str('xref\n0 6\n0000000000 65535 f \n');
+  for (let i = 1; i <= 5; i++) str(String(offsets[i]).padStart(10, '0') + ' 00000 n \n');
+  str(`trailer\n<</Size 6/Root 1 0 R>>\nstartxref\n${xref}\n%%EOF`);
+  const out = new Uint8Array(len); let o = 0;
+  for (const u of parts){ out.set(u, o); o += u.length; }
+  return out;
+}
+document.getElementById('export-select').addEventListener('change', ev => {
+  if (!DATA){ ev.target.value=''; return; }
+  const v = ev.target.value;
+  if (v === 'svg') exportSvg();
+  else if (v === 'png') exportPng();
+  else if (v === 'pdf') exportPdf();
+  ev.target.value = '';
+});
+
+/* ---------- 数据入口 ---------- */
+window.renderEquity = function(data){ if (data) render(data); };
+if (EQUITY_DATA_INLINE) render(EQUITY_DATA_INLINE);
+</script>
+</body>
+</html>
